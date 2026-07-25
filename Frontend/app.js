@@ -7,6 +7,7 @@ let currentUser = null;
 let isGenerating = false;
 let currentImageUrl = null;
 
+// DOM Elements
 const loginScreen = document.getElementById('loginScreen');
 const mainApp = document.getElementById('mainApp');
 const generateBtn = document.getElementById('generateBtn');
@@ -16,6 +17,8 @@ const widthInput = document.getElementById('width');
 const heightInput = document.getElementById('height');
 const stepsInput = document.getElementById('steps');
 const guidanceInput = document.getElementById('guidance');
+const loraIdInput = document.getElementById('loraId'); // NEW
+const loraScaleInput = document.getElementById('loraScale'); // NEW
 const imageContainer = document.getElementById('imageContainer');
 const downloadBtn = document.getElementById('downloadBtn');
 const copyBtn = document.getElementById('copyBtn');
@@ -28,12 +31,14 @@ const closeHistoryBtn = document.getElementById('closeHistoryBtn');
 const historyGrid = document.getElementById('historyGrid');
 const refreshApiBtn = document.getElementById('refreshApiBtn');
 
+// Load saved API URL
 const savedApiUrl = localStorage.getItem('apiUrl');
 if (savedApiUrl) {
     API_CONFIG.baseUrl = savedApiUrl;
     apiUrlInput.value = savedApiUrl;
 }
 
+// Auth State Listener
 auth.onAuthStateChanged(user => {
     if (user) {
         currentUser = user;
@@ -50,6 +55,7 @@ auth.onAuthStateChanged(user => {
     }
 });
 
+// Login
 document.getElementById('googleLoginBtn').addEventListener('click', async () => {
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
@@ -60,13 +66,15 @@ document.getElementById('googleLoginBtn').addEventListener('click', async () => 
     }
 });
 
+// Logout
 document.getElementById('logoutBtn').addEventListener('click', () => auth.signOut());
 
+// Check API Connection
 async function checkApiConnection() {
     try {
         const response = await fetch(`${API_CONFIG.baseUrl}/health`, {
             method: 'GET',
-            headers: { 'ngrok-skip-browser-warning': 'true' }, // BYPASS NGROK WARNING
+            headers: { 'ngrok-skip-browser-warning': 'true' },
             timeout: 5000
         });
         if (response.ok) {
@@ -82,6 +90,7 @@ async function checkApiConnection() {
     }
 }
 
+// Save API URL
 saveApiBtn.addEventListener('click', () => {
     const newUrl = apiUrlInput.value.trim();
     if (newUrl) {
@@ -94,6 +103,7 @@ saveApiBtn.addEventListener('click', () => {
 
 refreshApiBtn.addEventListener('click', checkApiConnection);
 
+// Generate Image
 generateBtn.addEventListener('click', async () => {
     if (isGenerating || !currentUser) return;
     const prompt = promptInput.value.trim();
@@ -108,7 +118,7 @@ generateBtn.addEventListener('click', async () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'ngrok-skip-browser-warning': 'true', // BYPASS NGROK WARNING
+                'ngrok-skip-browser-warning': 'true',
                 'Authorization': `Bearer ${await currentUser.getIdToken()}`
             },
             body: JSON.stringify({
@@ -118,11 +128,18 @@ generateBtn.addEventListener('click', async () => {
                 height: parseInt(heightInput.value),
                 steps: parseInt(stepsInput.value),
                 guidance_scale: parseFloat(guidanceInput.value),
-                seed: -1
+                seed: -1,
+                // NEW: LoRA Payload
+                lora_identifier: loraIdInput.value.trim() || null,
+                lora_scale: parseFloat(loraScaleInput.value) || 1.0
             })
         });
         
-        if (!response.ok) throw new Error('Generation failed');
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Generation failed');
+        }
+        
         const data = await response.json();
         
         currentImageUrl = data.image_url;
@@ -138,15 +155,23 @@ generateBtn.addEventListener('click', async () => {
         downloadBtn.disabled = false;
         copyBtn.disabled = false;
         
+        // Save to Firestore
         await db.collection('users').doc(currentUser.uid).collection('generations').add({
-            prompt, negative_prompt: negativePromptInput.value, image_url: data.image_url,
-            width: parseInt(widthInput.value), height: parseInt(heightInput.value),
-            steps: parseInt(stepsInput.value), guidance_scale: parseFloat(guidanceInput.value),
-            seed: data.seed, created_at: firebase.firestore.FieldValue.serverTimestamp()
+            prompt, 
+            negative_prompt: negativePromptInput.value, 
+            image_url: data.image_url,
+            width: parseInt(widthInput.value), 
+            height: parseInt(heightInput.value),
+            steps: parseInt(stepsInput.value), 
+            guidance_scale: parseFloat(guidanceInput.value),
+            seed: data.seed, 
+            lora_identifier: loraIdInput.value.trim() || null, // Save LoRA info
+            created_at: firebase.firestore.FieldValue.serverTimestamp()
         });
+        
     } catch (error) {
         console.error('Generation error:', error);
-        alert('Failed to generate. Check console (F12) and ensure backend is running.');
+        alert(`Failed to generate: ${error.message}`);
     } finally {
         isGenerating = false;
         generateBtn.disabled = false;
@@ -154,6 +179,7 @@ generateBtn.addEventListener('click', async () => {
     }
 });
 
+// Download
 downloadBtn.addEventListener('click', () => {
     if (!currentImageUrl) return;
     const link = document.createElement('a');
@@ -162,6 +188,7 @@ downloadBtn.addEventListener('click', () => {
     link.click();
 });
 
+// Copy
 copyBtn.addEventListener('click', async () => {
     if (!currentImageUrl) return;
     try {
@@ -174,6 +201,7 @@ copyBtn.addEventListener('click', async () => {
     }
 });
 
+// History Modal
 historyNav.addEventListener('click', async (e) => {
     e.preventDefault();
     historyModal.style.display = 'flex';
@@ -189,6 +217,7 @@ historyNav.addEventListener('click', async (e) => {
                 currentImageUrl = data.image_url;
                 imageContainer.innerHTML = `<img src="${data.image_url}" alt="Generated Image" class="generated-image">`;
                 document.getElementById('outputTitle').textContent = data.prompt.substring(0, 50) + '...';
+                document.getElementById('outputCaption').textContent = data.prompt;
                 document.getElementById('infoSeed').textContent = data.seed;
                 document.getElementById('infoSteps').textContent = data.steps;
                 document.getElementById('infoSize').textContent = `${data.width}x${data.height}`;
