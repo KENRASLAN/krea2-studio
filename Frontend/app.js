@@ -2,9 +2,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-let currentUser = null;
-let isGenerating = false;
-let currentImageUrl = null;
+let currentUser = null, isGenerating = false, currentImageUrl = null;
 
 const loginScreen = document.getElementById('loginScreen');
 const mainApp = document.getElementById('mainApp');
@@ -40,7 +38,7 @@ auth.onAuthStateChanged(user => {
         document.getElementById('userName').textContent = user.displayName || 'User';
         document.getElementById('userEmail').textContent = user.email;
         document.getElementById('userAvatar').textContent = user.email[0].toUpperCase();
-        checkApiConnection();
+        testConnection();
     } else {
         currentUser = null;
         loginScreen.style.display = 'flex';
@@ -55,20 +53,29 @@ document.getElementById('googleLoginBtn').addEventListener('click', async () => 
 
 document.getElementById('logoutBtn').addEventListener('click', () => auth.signOut());
 
-async function checkApiConnection() {
+async function testConnection() {
     try {
-        const response = await fetch(`${API_CONFIG.baseUrl}/health`, { method: 'GET', headers: { 'ngrok-skip-browser-warning': 'true' }, timeout: 5000 });
-        if (response.ok) { apiStatus.className = 'status-indicator connected'; apiStatus.querySelector('.status-text').textContent = 'Connected'; } 
-        else { throw new Error('API not responding'); }
-    } catch (error) { apiStatus.className = 'status-indicator error'; apiStatus.querySelector('.status-text').textContent = 'Disconnected'; }
+        const response = await fetch(`${API_CONFIG.baseUrl}/health`, {
+            method: 'GET',
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+            timeout: 5000
+        });
+        if (response.ok) { 
+            apiStatus.className = 'status-indicator connected'; 
+            apiStatus.querySelector('.status-text').textContent = 'Connected'; 
+        } else { throw new Error('API not responding'); }
+    } catch (error) { 
+        apiStatus.className = 'status-indicator error'; 
+        apiStatus.querySelector('.status-text').textContent = 'Disconnected'; 
+    }
 }
 
 saveApiBtn.addEventListener('click', () => {
     const newUrl = apiUrlInput.value.trim();
-    if (newUrl) { API_CONFIG.baseUrl = newUrl; localStorage.setItem('apiUrl', newUrl); checkApiConnection(); alert('API URL saved!'); }
+    if (newUrl) { API_CONFIG.baseUrl = newUrl; localStorage.setItem('apiUrl', newUrl); testConnection(); alert('API URL saved!'); }
 });
 
-refreshApiBtn.addEventListener('click', checkApiConnection);
+refreshApiBtn.addEventListener('click', testConnection);
 
 generateBtn.addEventListener('click', async () => {
     if (isGenerating || !currentUser) return;
@@ -80,9 +87,20 @@ generateBtn.addEventListener('click', async () => {
     generateBtn.innerHTML = '<span class="loading"></span> Generating...';
     
     try {
+        // 1. Check connection first
+        const healthCheck = await fetch(`${API_CONFIG.baseUrl}/health`, {
+            headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (!healthCheck.ok) throw new Error("Backend is not responding. Check Ngrok URL.");
+
+        // 2. Generate
         const response = await fetch(`${API_CONFIG.baseUrl}/generate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true', 'Authorization': `Bearer ${await currentUser.getIdToken()}` },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'ngrok-skip-browser-warning': 'true', 
+                'Authorization': `Bearer ${await currentUser.getIdToken()}` 
+            },
             body: JSON.stringify({
                 prompt: prompt, negative_prompt: negativePromptInput.value.trim(),
                 width: parseInt(widthInput.value), height: parseInt(heightInput.value),
@@ -91,7 +109,15 @@ generateBtn.addEventListener('click', async () => {
             })
         });
         
-        if (!response.ok) { const errData = await response.json().catch(() => ({})); throw new Error(errData.detail || 'Generation failed'); }
+        if (!response.ok) { 
+            let errorMsg = `Server Error: ${response.status}`;
+            try {
+                const errData = await response.json();
+                if (errData.detail) errorMsg = errData.detail;
+            } catch(e) {}
+            throw new Error(errorMsg); 
+        }
+        
         const data = await response.json();
         
         currentImageUrl = data.image_url;
@@ -113,8 +139,14 @@ generateBtn.addEventListener('click', async () => {
             seed: data.seed, lora_identifier: loraIdInput.value.trim() || null,
             created_at: firebase.firestore.FieldValue.serverTimestamp()
         });
-    } catch (error) { console.error('Generation error:', error); alert(`Failed to generate: ${error.message}`); } 
-    finally { isGenerating = false; generateBtn.disabled = false; generateBtn.textContent = '🔮 Generate Image'; }
+    } catch (error) { 
+        console.error('Generation error:', error); 
+        alert(`Error: ${error.message}`); 
+    } finally { 
+        isGenerating = false; 
+        generateBtn.disabled = false; 
+        generateBtn.textContent = '🔮 Generate Image'; 
+    }
 });
 
 downloadBtn.addEventListener('click', () => {
