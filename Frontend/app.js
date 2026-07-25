@@ -77,6 +77,9 @@ async function checkApiConnection() {
     try {
         const response = await fetch(`${API_CONFIG.baseUrl}/health`, {
             method: 'GET',
+             headers: {
+                'ngrok-skip-browser-warning': 'true' // <--- ADD THIS LINE
+            },
             timeout: 5000
         });
         
@@ -125,6 +128,7 @@ generateBtn.addEventListener('click', async () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                 'ngrok-skip-browser-warning': 'true',
                 'Authorization': `Bearer ${await currentUser.getIdToken()}`
             },
             body: JSON.stringify({
